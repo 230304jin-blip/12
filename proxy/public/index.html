@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude 反代 · 全模型聊天</title>
+<style>
+  :root {
+    --bg: #0d1017;
+    --panel: #151a23;
+    --panel-2: #1b212c;
+    --border: #262d3a;
+    --text: #e6e9ef;
+    --muted: #8b93a4;
+    --accent: #d97757;
+    --accent-2: #c4623f;
+    --user: #223047;
+    --bot: #1b212c;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header .logo { font-weight: 700; font-size: 16px; letter-spacing: .3px; }
+  header .logo span { color: var(--accent); }
+  header .spacer { flex: 1; }
+  select, input, textarea, button {
+    font: inherit; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 10px; outline: none;
+  }
+  select:focus, input:focus, textarea:focus { border-color: var(--accent); }
+  button {
+    cursor: pointer; background: var(--accent); border: none; color: #fff; font-weight: 600;
+    transition: background .15s;
+  }
+  button:hover { background: var(--accent-2); }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); font-weight: 500; }
+  button.ghost:hover { color: var(--text); border-color: var(--accent); }
+
+  .layout { flex: 1; display: flex; min-height: 0; }
+
+  aside {
+    width: 300px; border-right: 1px solid var(--border); background: var(--panel);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+  }
+  aside label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  aside .field { display: flex; flex-direction: column; }
+  aside input, aside select, aside textarea { width: 100%; }
+  aside textarea { resize: vertical; min-height: 60px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .hint code { background: var(--panel-2); padding: 1px 5px; border-radius: 5px; }
+
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #messages { flex: 1; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; gap: 12px; max-width: 860px; width: 100%; margin: 0 auto; }
+  .msg .avatar {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 13px; font-weight: 700;
+  }
+  .msg.user .avatar { background: var(--user); color: #9fc0ff; }
+  .msg.assistant .avatar { background: #2a2018; color: var(--accent); }
+  .msg .bubble {
+    background: var(--bot); border: 1px solid var(--border);
+    padding: 12px 14px; border-radius: var(--radius); line-height: 1.65;
+    white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; flex: 1;
+  }
+  .msg.user .bubble { background: var(--user); border-color: #2c3d59; }
+  .msg .bubble.error { border-color: #c0392b; color: #ff9b8f; }
+  .cursor::after { content: "▋"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }
+
+  footer {
+    border-top: 1px solid var(--border); background: var(--panel);
+    padding: 12px 18px;
+  }
+  .composer { max-width: 860px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
+  .composer textarea {
+    flex: 1; resize: none; max-height: 200px; min-height: 46px; line-height: 1.5;
+  }
+  .composer button { height: 46px; padding: 0 22px; }
+  .status { max-width: 860px; margin: 6px auto 0; font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; margin: auto; max-width: 420px; line-height: 1.7; }
+  @media (max-width: 720px) { aside { display: none; } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">Claude<span>反代</span></div>
+    <div class="spacer"></div>
+    <button class="ghost" id="clearBtn">清空对话</button>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="field">
+        <label>API 基址 (Base URL)</label>
+        <input id="baseUrl" placeholder="留空 = 当前站点" />
+      </div>
+      <div class="field">
+        <label>访问密钥 / API Key</label>
+        <input id="apiKey" type="password" placeholder="若服务器已配置可留空" />
+      </div>
+      <div class="field">
+        <label>模型</label>
+        <div class="row">
+          <select id="model"></select>
+        </div>
+        <button class="ghost" id="reloadModels" style="margin-top:8px">刷新模型列表</button>
+      </div>
+      <div class="field">
+        <label>System 提示词</label>
+        <textarea id="system" placeholder="可选，设定助手角色"></textarea>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Temperature</label>
+          <input id="temperature" type="number" min="0" max="1" step="0.1" value="1" />
+        </div>
+        <div class="field">
+          <label>Max tokens</label>
+          <input id="maxTokens" type="number" min="1" step="256" value="4096" />
+        </div>
+      </div>
+      <div class="hint">
+        接口: <br />
+        · 原生 <code>POST /v1/messages</code><br />
+        · OpenAI <code>POST /v1/chat/completions</code><br />
+        · 模型 <code>GET /v1/models</code><br />
+        设置保存在浏览器本地。
+      </div>
+    </aside>
+
+    <main>
+      <div id="messages">
+        <div class="empty" id="emptyHint">
+          👋 输入消息开始对话。<br />
+          本页面通过反向代理调用 Claude 全系模型。<br />
+          在左侧选择模型、填写密钥（如需）。
+        </div>
+      </div>
+      <footer>
+        <div class="composer">
+          <textarea id="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <button id="sendBtn">发送</button>
+        </div>
+        <div class="status" id="status"></div>
+      </footer>
+    </main>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  baseUrl: $('baseUrl'), apiKey: $('apiKey'), model: $('model'),
+  system: $('system'), temperature: $('temperature'), maxTokens: $('maxTokens'),
+  input: $('input'), messages: $('messages'), status: $('status'),
+  emptyHint: $('emptyHint'),
+};
+
+const STORE = 'claude-proxy-ui';
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE) || '{}');
+    if (s.baseUrl != null) els.baseUrl.value = s.baseUrl;
+    if (s.apiKey != null) els.apiKey.value = s.apiKey;
+    if (s.system != null) els.system.value = s.system;
+    if (s.temperature != null) els.temperature.value = s.temperature;
+    if (s.maxTokens != null) els.maxTokens.value = s.maxTokens;
+    return s;
+  } catch { return {}; }
+}
+function saveSettings() {
+  localStorage.setItem(STORE, JSON.stringify({
+    baseUrl: els.baseUrl.value, apiKey: els.apiKey.value, system: els.system.value,
+    temperature: els.temperature.value, maxTokens: els.maxTokens.value, model: els.model.value,
+  }));
+}
+['baseUrl','apiKey','system','temperature','maxTokens'].forEach((k) =>
+  els[k].addEventListener('change', saveSettings));
+els.model.addEventListener('change', saveSettings);
+
+function base() {
+  const b = els.baseUrl.value.trim().replace(/\/+$/, '');
+  return b || '';
+}
+function authHeaders() {
+  const key = els.apiKey.value.trim();
+  const h = { 'Content-Type': 'application/json' };
+  if (key) { h['Authorization'] = 'Bearer ' + key; h['x-api-key'] = key; }
+  return h;
+}
+
+let history = []; // {role, content}
+
+async function loadModels() {
+  els.status.textContent = '加载模型列表…';
+  try {
+    const r = await fetch(base() + '/v1/models', { headers: authHeaders() });
+    const data = await r.json();
+    const ids = (data.data || []).map((m) => m.id);
+    const saved = (JSON.parse(localStorage.getItem(STORE) || '{}')).model;
+    els.model.innerHTML = '';
+    ids.forEach((id) => {
+      const o = document.createElement('option');
+      o.value = id; o.textContent = id;
+      els.model.appendChild(o);
+    });
+    if (saved && ids.includes(saved)) els.model.value = saved;
+    els.status.textContent = `已加载 ${ids.length} 个模型`;
+  } catch (e) {
+    els.status.textContent = '模型加载失败: ' + e.message;
+  }
+}
+
+function addMsg(role, text) {
+  if (els.emptyHint) { els.emptyHint.remove(); els.emptyHint = null; }
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? '你' : 'C';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  wrap.appendChild(avatar); wrap.appendChild(bubble);
+  els.messages.appendChild(wrap);
+  els.messages.scrollTop = els.messages.scrollHeight;
+  return bubble;
+}
+
+let sending = false;
+async function send() {
+  if (sending) return;
+  const text = els.input.value.trim();
+  if (!text) return;
+  sending = true;
+  els.input.value = '';
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+
+  const bubble = addMsg('assistant', '');
+  bubble.classList.add('cursor');
+  els.status.textContent = '生成中…';
+
+  const body = {
+    model: els.model.value,
+    max_tokens: parseInt(els.maxTokens.value || '4096', 10),
+    temperature: parseFloat(els.temperature.value || '1'),
+    stream: true,
+    messages: [],
+  };
+  const sys = els.system.value.trim();
+  if (sys) body.messages.push({ role: 'system', content: sys });
+  body.messages.push(...history);
+
+  let acc = '';
+  try {
+    const resp = await fetch(base() + '/v1/chat/completions', {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
+    });
+    if (!resp.ok || !resp.body) {
+      const errText = await resp.text().catch(() => resp.statusText);
+      throw new Error(`HTTP ${resp.status}: ${errText}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) !== -1) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const d = line.slice(5).trim();
+          if (d === '[DONE]') continue;
+          try {
+            const j = JSON.parse(d);
+            const delta = j.choices?.[0]?.delta?.content;
+            if (delta) { acc += delta; bubble.textContent = acc; els.messages.scrollTop = els.messages.scrollHeight; }
+          } catch {}
+        }
+      }
+    }
+    bubble.classList.remove('cursor');
+    if (!acc) bubble.textContent = '(空响应)';
+    history.push({ role: 'assistant', content: acc });
+    els.status.textContent = '完成';
+  } catch (e) {
+    bubble.classList.remove('cursor');
+    bubble.classList.add('error');
+    bubble.textContent = '错误: ' + e.message;
+    history.pop(); // 回滚失败的用户轮次以便重试
+    els.status.textContent = '请求失败';
+  } finally {
+    sending = false;
+  }
+}
+
+$('sendBtn').addEventListener('click', send);
+els.input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('clearBtn').addEventListener('click', () => {
+  history = [];
+  els.messages.innerHTML = '';
+  const hint = document.createElement('div');
+  hint.className = 'empty';
+  hint.textContent = '对话已清空。';
+  els.messages.appendChild(hint);
+  els.emptyHint = hint;
+});
+$('reloadModels').addEventListener('click', loadModels);
+
+loadSettings();
+loadModels();
+</script>
+</body>
+</html>

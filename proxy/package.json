@@ -1,0 +1,15 @@
+{
+  "name": "claude-reverse-proxy",
+  "version": "1.0.0",
+  "description": "反向代理 Claude (Anthropic) 全系模型的网站, 支持原生与 OpenAI 兼容接口、流式输出与内置聊天界面。",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
