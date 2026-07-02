@@ -1,5 +1,6 @@
 node_modules/
 .env
+keys.json
 *.log
 .DS_Store
 .wrangler/

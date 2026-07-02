@@ -1,111 +1,81 @@
-# Claude 反代 · 全模型代理网站
+# Claude 反代 · 酒馆(SillyTavern)专用仪表盘
 
-一个反向代理 **Claude (Anthropic) 全系模型** 的网站 / API 网关。零第三方依赖，单文件 Node 服务，附带内置聊天网页界面，另有 Cloudflare Worker 部署版本。
+一个极简的 **Claude (Anthropic) 反向代理**：打开一个网址进入仪表盘，粘贴你自己的 Anthropic API Key，一键生成 **反代 URL + 反代密码**，直接填进 SillyTavern 即可使用 **Fable 5 等最新模型**。
 
-## 特性
+零第三方依赖，单文件 Node 服务，另附 Docker 与 Cloudflare Worker 版本。
 
-- **原生接口透传**：`POST /v1/messages`，与 Anthropic 官方完全一致，支持流式 SSE。
-- **OpenAI 兼容接口**：`POST /v1/chat/completions`，可直接接入任何 OpenAI 客户端（NextChat、LobeChat、各类 SDK 等），自动完成请求/响应/流式格式转换。
-- **模型列表**：`GET /v1/models`，优先从上游实时拉取全部可用模型，失败时回退到内置清单。
-- **全部 Claude 模型**：不写死单一模型，客户端传什么 `model` 就转发什么（Opus / Sonnet / Haiku 各版本均可）。
-- **密钥管理两种模式**：
-  - 服务器持有上游密钥（`ANTHROPIC_API_KEY`），对外用自定义 `ACCESS_KEY` 授权；
-  - 或不持密钥，纯转发客户端自带的 `x-api-key`。
-- **内置网页聊天界面**：`GET /`，可选模型、System 提示词、温度、流式显示，设置存本地浏览器。
-- **CORS 全开**，方便浏览器/前端直连。
-- **多种部署**：`node server.js`、Docker、Cloudflare Worker。
+## 它是怎么工作的
 
-## 快速开始（Node）
+- 你在仪表盘粘贴 **自己的** Anthropic API Key（来自 <https://console.anthropic.com>）。
+- 服务器先向官方 `/v1/models` 校验这个 Key，通过后生成一个随机 **反代密码**（形如 `sk-tavern-xxxx`），保存在服务器本地 `keys.json`。
+- 之后 SillyTavern 用这个 **反代密码** 访问本站，服务器再用你真实的 Key 转发到官方 API。这样密码可以随时更换/撤销，真实 Key 不外泄。
+
+> 关于「authorize」：你问的“通过 Claude 官网 OAuth 授权、复用订阅额度”那种做法违反 Anthropic 条款，这里不做。改为你粘贴自己的 API Key 完成“授权”，效果对酒馆完全一样，且合规。
+
+## 快速开始
 
 ```bash
 cd proxy
-# 方式 A：服务器持有密钥，对外发访问码
-ANTHROPIC_API_KEY=sk-ant-xxxx ACCESS_KEY=my-secret node server.js
-
-# 方式 B：不持密钥，客户端自带 key
 node server.js
+# 打开 http://localhost:8787  → 粘贴 API Key → 生成反代
 ```
 
-打开 <http://localhost:8787> 即可使用网页界面。
+## 在 SillyTavern 里填写
 
-### 环境变量
+1. API 选 **Chat Completion**，来源选 **Claude**
+2. 勾选 **使用反向代理 (Use Reverse Proxy)**
+3. **反代 URL**：填仪表盘显示的地址（如 `https://your-host`）
+4. **反代密码**：填仪表盘生成的 `sk-tavern-...`
+5. 模型选 `claude-fable-5`（或点“连接”后在列表里选最新模型）
+6. 点“连接”即可
+
+> 服务器按 **路径后缀** 路由（`*/messages`、`*/chat/completions`、`*/models`），所以反代 URL 无论填成 `https://host` 还是 `https://host/v1` 都能正常工作。
+
+## 环境变量
 
 | 变量 | 说明 | 默认 |
 |------|------|------|
-| `PORT` | 监听端口 | `8787` |
-| `HOST` | 监听地址 | `0.0.0.0` |
+| `PORT` / `HOST` | 监听端口 / 地址 | `8787` / `0.0.0.0` |
 | `ANTHROPIC_BASE_URL` | 上游地址 | `https://api.anthropic.com` |
-| `ANTHROPIC_API_KEY` | 服务器持有的上游密钥（可选） | 空 |
-| `ACCESS_KEY` | 客户端访问密钥，逗号分隔多个（可选） | 空 |
-| `ANTHROPIC_VERSION` | Anthropic 接口版本 | `2023-06-01` |
+| `ANTHROPIC_API_KEY` | 服务器预置上游密钥（可选） | 空 |
+| `ACCESS_KEY` | 固定访问密钥，逗号分隔（可选，配合预置密钥用） | 空 |
+| `ALLOW_REGISTER` | 是否允许仪表盘在线注册密码；公网可设 `false` | `true` |
+| `STORE_PATH` | 密码存储文件路径 | `./keys.json` |
+| `ANTHROPIC_VERSION` | 接口版本 | `2023-06-01` |
 | `DEFAULT_MAX_TOKENS` | OpenAI 接口默认 max_tokens | `4096` |
 
-> 鉴权规则：配置了 `ACCESS_KEY` 时，客户端须在 `Authorization: Bearer <ACCESS_KEY>` 或 `x-api-key` 中携带访问码，通过后使用服务器的上游密钥。未配置 `ACCESS_KEY` 时，直接透传客户端自带的上游 key。
+## 接口一览
 
-## 调用示例
-
-原生 Anthropic：
-
-```bash
-curl http://localhost:8787/v1/messages \
-  -H "x-api-key: <你的访问码或上游key>" \
-  -H "content-type: application/json" \
-  -d '{"model":"claude-sonnet-5","max_tokens":1024,
-       "messages":[{"role":"user","content":"你好"}]}'
-```
-
-OpenAI 兼容（流式）：
-
-```bash
-curl http://localhost:8787/v1/chat/completions \
-  -H "Authorization: Bearer <你的访问码或上游key>" \
-  -H "content-type: application/json" \
-  -d '{"model":"claude-opus-4-8","stream":true,
-       "messages":[{"role":"user","content":"你好"}]}'
-```
-
-接入 OpenAI 客户端时，把 **Base URL** 填 `http://your-host:8787/v1`，**API Key** 填访问码即可。
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 仪表盘网页 |
+| POST | `/api/register` | 用 API Key 换反代密码 `{ "apiKey": "sk-ant-..." }` |
+| POST | `*/v1/messages` | 原生 Anthropic，透传 + 流式 |
+| POST | `*/v1/chat/completions` | OpenAI 兼容，含流式 |
+| GET | `*/v1/models` | 模型列表（实时/回退） |
+| GET | `/healthz` | 健康检查 |
 
 ## Docker 部署
 
 ```bash
 cd proxy
 docker build -t claude-proxy .
-docker run -d -p 8787:8787 \
-  -e ANTHROPIC_API_KEY=sk-ant-xxxx \
-  -e ACCESS_KEY=my-secret \
-  --name claude-proxy claude-proxy
+docker run -d -p 8787:8787 -v $PWD/keys.json:/app/keys.json --name claude-proxy claude-proxy
 ```
 
 ## Cloudflare Worker 部署
 
-`worker.js` 为 Worker 版本（提供 API 反代与流式，不含网页界面）：
-
-1. 新建 Worker，粘贴 `worker.js`；
-2. 在 Variables 中配置 `ANTHROPIC_API_KEY` / `ACCESS_KEY`（可选）；
-3. 接口路径与 Node 版一致。
-
-用 wrangler：
+`worker.js` 为纯 API 反代版（无仪表盘，用环境变量密钥）：
 
 ```bash
 npx wrangler deploy worker.js --name claude-proxy
 npx wrangler secret put ANTHROPIC_API_KEY
 ```
 
-## 接口一览
+## 安全与合规
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/v1/messages` | 原生 Anthropic，透明透传 + 流式 |
-| POST | `/v1/chat/completions` | OpenAI 兼容，含流式 |
-| GET | `/v1/models` | 模型列表（实时/回退） |
-| GET | `/healthz` | 健康检查 |
-| GET | `/` | 网页聊天界面 |
-
-## 说明与合规
-
-- 本项目仅是 API 转发网关，**不含任何密钥**；请使用你自己的合法 Anthropic 密钥，并遵守 Anthropic 使用条款。
-- 建议在生产环境开启 `ACCESS_KEY` 并置于 HTTPS 之后，避免上游密钥被滥用。
+- 本服务只转发到官方 API，**不含也不生成任何 Anthropic 密钥**；请用你自己的合法密钥并遵守 Anthropic 使用条款。
+- `keys.json` 内含真实密钥明文，已在 `.gitignore` 中排除；生产环境请置于 HTTPS 之后，`chmod 600`，必要时设 `ALLOW_REGISTER=false`。
 
 ## License
 
